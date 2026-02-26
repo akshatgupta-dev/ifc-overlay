@@ -1,10 +1,3 @@
-Based on the context of your repository and the project files you've been working on (like `main.ts`, `yolo_browser.ts`, `pdf_render.ts`, and your Vite setup), it looks like you are building a **BIM automation tool** that uses Three.js, ONNX Runtime (YOLO), and mathematics to align and overlay 2D floor plans onto 3D IFC models.
-
-Here is a professional, complete `README.md` file tailored specifically for your `ifc-overlay` project. You can copy this directly and commit it to your repository!
-
----
-
-```markdown
 # IFC Overlay 🏗️
 
 A Building Information Modeling (BIM) automation pipeline tool designed to seamlessly align, calibrate, and overlay 2D floor plans (PDFs) onto 3D IFC models. This project utilizes in-browser Machine Learning (via ONNX Runtime) to handle automated element detection and mathematical alignment techniques to precisely position 2D overlays into 3D coordinate spaces.
@@ -25,7 +18,8 @@ A Building Information Modeling (BIM) automation pipeline tool designed to seaml
 * **BIM / PDF Handling:** Custom automation pipeline
 
 ## 📂 Folder Structure
-```text
+
+
 ifc-overlay/
 ├── public/                 # Static assets, WebAssembly files (ort-wasm), and ONNX models
 ├── src/                    # Source code
@@ -37,7 +31,7 @@ ifc-overlay/
 ├── package.json            # Project dependencies and scripts
 └── tsconfig.json           # TypeScript configuration
 
-```
+
 
 ## 🚀 Getting Started
 
