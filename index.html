@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IFC + Floorplan Overlay</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+      #app { position: relative; width: 100%; height: 100%; }
+      #container { width: 100%; height: 100%; background: #111; }
+      #toolbar {
+        position: absolute; top: 12px; left: 12px; z-index: 10;
+        display: flex; gap: 10px; align-items: center;
+        background: rgba(0,0,0,0.55); color: #fff; padding: 10px 12px; border-radius: 10px;
+        backdrop-filter: blur(6px);
+      }
+      #drop {
+        position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        color: rgba(255,255,255,0.85); z-index: 5;
+        pointer-events: none;
+        text-align: center;
+        padding: 24px;
+      }
+      #hint {
+        display: inline-block;
+        background: rgba(0,0,0,0.55);
+        padding: 16px 18px;
+        border-radius: 14px;
+        line-height: 1.35;
+        max-width: 680px;
+      }
+      label { display: inline-flex; gap: 8px; align-items: center; }
+      input[type="range"] { width: 140px; }
+      select, button, input[type="file"] { accent-color: #7aa2ff; }
+      button { cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="toolbar">
+        <button id="calibrate" disabled>Calibrate</button>
+<button id="resetPlan" disabled>Reset</button>
+<span id="status" style="margin-left:10px; opacity:.85"></span>
+
+        <input id="fileInput" type="file" multiple accept=".ifc,image/png" />
+        <label>
+          Floor
+          <select id="floorSelect" disabled></select>
+        </label>
+        <label>
+          Opacity
+          <input id="opacity" type="range" min="0" max="1" step="0.05" value="0.65" />
+        </label>
+        <button id="focusPlan" disabled>Focus plan</button>
+      </div>
+
+      <div id="drop">
+        <div id="hint">
+          <div style="font-size:18px; font-weight:700; margin-bottom:6px;">Drop files to auto-overlay</div>
+          <div>Drop <b>1× IFC</b> and <b>2× PNG floor plans</b> anywhere on this page.</div>
+          <div style="opacity:.85; margin-top:8px; font-size:13px;">
+            Tip: if your plan appears rotated, export the plan in the same orientation as the IFC.
+          </div>
+        </div>
+      </div>
+
+      <div id="container"></div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
