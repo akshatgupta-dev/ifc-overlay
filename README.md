@@ -43,7 +43,7 @@ Make sure you have [Node.js](https://nodejs.org/) installed on your machine.
 
 1. Clone the repository:
 ```bash
-git clone [https://github.com/akshatgupta-dev/ifc-overlay.git](https://github.com/akshatgupta-dev/ifc-overlay.git)
+git clone https://github.com/akshatgupta-dev/ifc-overlay.git
 cd ifc-overlay
 
 ```
@@ -90,17 +90,3 @@ The core logic relies on identifying matching "anchor points" between the 2D Pla
 ## 📄 License
 
 This project is proprietary. All rights reserved.
-*(Note: Update this section if you plan to open-source it under MIT, Apache, etc.)*
-
-```
-
-***
-
-### How to add this to your GitHub Repository using VS Code:
-1. In your VS Code project, create a new file in the root folder (where your `package.json` is) and name it `README.md`.
-2. Paste the code block above into the file and save it.
-3. Go to the **Source Control** tab on the left sidebar.
-4. Type a message like *"Added README"* in the message box.
-5. Click **Commit**, then click **Sync Changes** (or **Push**) to upload it straight to your GitHub!
-
-```
