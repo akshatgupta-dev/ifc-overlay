@@ -19,7 +19,7 @@ A Building Information Modeling (BIM) automation pipeline tool designed to seaml
 
 ## 📂 Folder Structure
 
-
+```markdown
 ifc-overlay/
 ├── public/                 # Static assets, WebAssembly files (ort-wasm), and ONNX models
 ├── src/                    # Source code
@@ -30,7 +30,7 @@ ifc-overlay/
 ├── index.html              # App entry point
 ├── package.json            # Project dependencies and scripts
 └── tsconfig.json           # TypeScript configuration
-
+```
 
 
 ## 🚀 Getting Started
