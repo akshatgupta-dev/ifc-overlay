@@ -1,5 +1,7 @@
-import * as ort from "onnxruntime-web/wasm";
-// ort.env.wasm.wasmPaths = "/ort/";
+import type * as OrtTypes from "onnxruntime-web";
+
+// runtime comes from the script tag (global)
+const ort = (window as any).ort as typeof import("onnxruntime-web");
 
 export type Detection = {
   cls: "light_square" | "socket" | "switches" | "TV_socket";
@@ -146,26 +148,53 @@ export class YoloBrowserDetector {
   private inputName: string | null = null;
   private outputName: string | null = null;
 
-  constructor(private modelUrl = "/models/electrical.onnx", private inputSize = 640) {}
+  private initPromise: Promise<void> | null = null;
+  private modelBytes: Uint8Array | null = null;
+
+  constructor(private modelUrl: string, private inputSize = 640) {
+    if (!modelUrl) throw new Error("YoloBrowserDetector: modelUrl is empty/undefined");
+  }
 
   async init() {
     if (this.session) return;
+    if (this.initPromise) return this.initPromise;
 
-    // 💥 THE VITE BYPASS 💥
-    ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+    this.initPromise = (async () => {
+      ort.env.wasm.wasmPaths = `${import.meta.env.BASE_URL}ort/`;
+      ort.env.wasm.numThreads = 1;
+      ort.env.wasm.proxy = false;
 
-    this.session = await ort.InferenceSession.create(this.modelUrl, {
-      executionProviders: ["wasm"],
+      const res = await fetch(this.modelUrl, { cache: "no-store" });
+
+      console.log("[ONNX] requested", this.modelUrl);
+      console.log("[ONNX] res.url", res.url);
+      console.log("[ONNX] status", res.status, res.statusText);
+      console.log("[ONNX] content-type", res.headers.get("content-type"));
+      console.log("[ONNX] content-length", res.headers.get("content-length"));
+
+      const ab = await res.arrayBuffer();
+      this.modelBytes = new Uint8Array(ab);
+
+      console.log("[ONNX] bytes", this.modelBytes.byteLength);
+      console.log("[ONNX] head80", new TextDecoder().decode(this.modelBytes.slice(0, 80)));
+
+      this.session = await ort.InferenceSession.create(this.modelBytes, {
+        executionProviders: ["wasm"],
+      });
+
+      this.inputName = this.session.inputNames[0];
+      this.outputName = this.session.outputNames[0];
+    })().catch((e) => {
+      this.initPromise = null;
+      this.session = null;
+      throw e;
     });
 
-    this.inputName = this.session.inputNames[0];
-    this.outputName = this.session.outputNames[0];
+    return this.initPromise;
   }
 
-  /**
-   * Detect directly from PNG File. Returns detections in ORIGINAL PNG pixel coords.
-   * NEW: caches result per-file SHA256 + modelUrl + thresholds.
-   */
+  // detectFile unchanged...
+
   async detectFile(file: File, confThres = 0.25, iouThres = 0.45): Promise<Detection[]> {
     await this.init();
     if (!this.session || !this.inputName || !this.outputName) return [];
