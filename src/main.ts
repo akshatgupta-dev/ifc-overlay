@@ -67,9 +67,273 @@ type FilterState = {
   isolateBand: number; // world units (half-band)
 };
 
+// ==============================
+// OpenCV + ECC Auto-Align Helpers
+// ==============================
+declare const cv: any;
+
+// 2.1 OpenCV loader helper
+function ensureOpenCV(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if ((window as any).cv?.findTransformECC) return resolve();
+
+    const t0 = performance.now();
+    const tick = () => {
+      const c = (window as any).cv;
+
+      // Some builds expose onRuntimeInitialized
+      if (c?.onRuntimeInitialized) {
+        const prev = c.onRuntimeInitialized;
+        c.onRuntimeInitialized = () => {
+          try {
+            prev?.();
+          } finally {
+            resolve();
+          }
+        };
+        return;
+      }
+
+      // already initialized in some builds:
+      if (c?.findTransformECC) return resolve();
+
+      if (performance.now() - t0 > 15000) return reject(new Error("OpenCV.js not ready"));
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+}
+
+// 2.2 Utilities: simple 3×3 matrix ops (for chaining transforms)
+type Mat3 = number[]; // row-major length 9
+
+function mat3Mul(A: Mat3, B: Mat3): Mat3 {
+  const C = new Array(9).fill(0);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      C[r * 3 + c] =
+        A[r * 3 + 0] * B[0 * 3 + c] +
+        A[r * 3 + 1] * B[1 * 3 + c] +
+        A[r * 3 + 2] * B[2 * 3 + c];
+    }
+  }
+  return C;
+}
+
+function mat3Inv(M: Mat3): Mat3 {
+  const a = M[0], b = M[1], c = M[2];
+  const d = M[3], e = M[4], f = M[5];
+  const g = M[6], h = M[7], i = M[8];
+
+  const A =  (e * i - f * h);
+  const B = -(d * i - f * g);
+  const C =  (d * h - e * g);
+  const D = -(b * i - c * h);
+  const E =  (a * i - c * g);
+  const F = -(a * h - b * g);
+  const G =  (b * f - c * e);
+  const H = -(a * f - c * d);
+  const I =  (a * e - b * d);
+
+  const det = a * A + b * B + c * C;
+  if (!isFinite(det) || Math.abs(det) < 1e-12) throw new Error("Singular mat3");
+
+  const invDet = 1 / det;
+  return [
+    A * invDet, D * invDet, G * invDet,
+    B * invDet, E * invDet, H * invDet,
+    C * invDet, F * invDet, I * invDet,
+  ];
+}
+
+function applyH(T: Mat3, x: number, y: number): { x: number; y: number } {
+  const X = T[0] * x + T[1] * y + T[2];
+  const Y = T[3] * x + T[4] * y + T[5];
+  const W = T[6] * x + T[7] * y + T[8];
+  if (!isFinite(W) || Math.abs(W) < 1e-12) return { x: NaN, y: NaN };
+  return { x: X / W, y: Y / W };
+}
+
+function warp2x3ToMat3(w: any): Mat3 {
+  // w is cv.Mat 2x3 float
+  const d = w.data32F ?? w.data64F ?? w.data;
+  return [
+    d[0], d[1], d[2],
+    d[3], d[4], d[5],
+    0,    0,    1,
+  ];
+}
+
+// 2.3 Plan edges raster (stand-in for PDF extraction stage)
+function removeSmallComponents(binU8: any, minArea = 60): any {
+  // binU8: 0..255
+  const bin01 = new cv.Mat();
+  cv.threshold(binU8, bin01, 1, 1, cv.THRESH_BINARY);
+
+  const labels = new cv.Mat();
+  const stats = new cv.Mat();
+  const cents = new cv.Mat();
+
+  // Some OpenCV.js builds may not include this; if missing, fallback.
+  if (!cv.connectedComponentsWithStats) {
+    labels.delete(); stats.delete(); cents.delete();
+    // fallback: morphological opening (weaker)
+    const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+    const out = new cv.Mat();
+    cv.morphologyEx(binU8, out, cv.MORPH_OPEN, k);
+    k.delete(); bin01.delete();
+    return out;
+  }
+
+  const n = cv.connectedComponentsWithStats(bin01, labels, stats, cents, 8, cv.CV_32S);
+  const out = new cv.Mat.zeros(binU8.rows, binU8.cols, cv.CV_8U);
+
+  // stats is n x 5: [x,y,w,h,area]
+  const st = stats.data32S;
+  for (let i = 1; i < n; i++) {
+    const area = st[i * 5 + 4];
+    if (area >= minArea) {
+      // out[labels==i] = 255
+      const mask = new cv.Mat();
+      cv.compare(labels, i, mask, cv.CMP_EQ);
+      out.setTo(new cv.Scalar(255), mask);
+      mask.delete();
+    }
+  }
+
+  bin01.delete(); labels.delete(); stats.delete(); cents.delete();
+  return out;
+}
+
+async function rasterizePlanEdges(
+  overlay: PlanOverlay,
+  outSize = 1024,
+  margin = 10
+): Promise<{ edges: any; A_plan: Mat3; invA_plan: Mat3; outCanvas: HTMLCanvasElement }> {
+  const imgEl: any = overlay.material.map?.image;
+  if (!imgEl) throw new Error("Plan texture has no image");
+
+  // draw plan image into square canvas with padding (records A_plan)
+  const srcW = Number(imgEl.width ?? overlay.imgW ?? 1);
+  const srcH = Number(imgEl.height ?? overlay.imgH ?? 1);
+
+  const scale = (outSize - 2 * margin) / Math.max(srcW, srcH);
+  const drawW = srcW * scale;
+  const drawH = srcH * scale;
+  const offX = margin + (outSize - 2 * margin - drawW) * 0.5;
+  const offY = margin + (outSize - 2 * margin - drawH) * 0.5;
+
+  const c = document.createElement("canvas");
+  c.width = outSize;
+  c.height = outSize;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, outSize, outSize);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(imgEl, offX, offY, drawW, drawH);
+
+  const A_plan: Mat3 = [
+    scale, 0,     offX,
+    0,     scale, offY,
+    0,     0,     1,
+  ];
+  const invA_plan = mat3Inv(A_plan);
+
+  // OpenCV edges
+  const rgba = cv.imread(c);
+  const gray = new cv.Mat();
+  cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
+
+  const edges = new cv.Mat();
+  cv.Canny(gray, edges, 50, 150);
+
+  // remove small CCs (specks / text noise)
+  const cleaned = removeSmallComponents(edges, 60);
+
+  // dilate helps ECC
+  const k = cv.Mat.ones(3, 3, cv.CV_8U);
+  const dil = new cv.Mat();
+  cv.dilate(cleaned, dil, k, new cv.Point(-1, -1), 1);
+
+  rgba.delete(); gray.delete(); edges.delete(); cleaned.delete(); k.delete();
+
+  return { edges: dil, A_plan, invA_plan, outCanvas: c };
+}
+
+// 2.5 ECC alignment + trimmed chamfer score
+function eccAlign(movingU8: any, fixedU8: any, motion: number, nIter = 2000) {
+  const movingF = new cv.Mat();
+  const fixedF = new cv.Mat();
+  movingU8.convertTo(movingF, cv.CV_32F, 1 / 255);
+  fixedU8.convertTo(fixedF, cv.CV_32F, 1 / 255);
+
+  const warp = cv.Mat.eye(2, 3, cv.CV_32F);
+  const criteria = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, nIter, 1e-7);
+
+  const cc = cv.findTransformECC(fixedF, movingF, warp, motion, criteria);
+
+  const aligned = new cv.Mat();
+  const size = new cv.Size(fixedU8.cols, fixedU8.rows);
+  cv.warpAffine(
+    movingU8,
+    aligned,
+    warp,
+    size,
+    cv.INTER_LINEAR + cv.WARP_INVERSE_MAP,
+    cv.BORDER_CONSTANT,
+    new cv.Scalar(0)
+  );
+
+  movingF.delete(); fixedF.delete();
+  return { cc, warp, aligned };
+}
+
+function trimmedChamfer(ifcWarpedU8: any, planU8: any, trimQ = 90) {
+  // Distance transform on plan edges (fixed)
+  const planBin = new cv.Mat();
+  cv.threshold(planU8, planBin, 1, 1, cv.THRESH_BINARY);
+
+  const ones = cv.Mat.ones(planBin.rows, planBin.cols, cv.CV_8U);
+  const inv = new cv.Mat();
+  cv.subtract(ones, planBin, inv);
+  ones.delete();
+
+  const dist = new cv.Mat();
+  cv.distanceTransform(inv, dist, cv.DIST_L2, 3);
+
+  const ifcBin = new cv.Mat();
+  cv.threshold(ifcWarpedU8, ifcBin, 1, 1, cv.THRESH_BINARY);
+
+  // collect distances at IFC edge pixels
+  const d: number[] = [];
+  for (let y = 0; y < ifcBin.rows; y++) {
+    for (let x = 0; x < ifcBin.cols; x++) {
+      if (ifcBin.ucharPtr(y, x)[0] > 0) {
+        d.push(dist.floatPtr(y, x)[0]);
+      }
+    }
+  }
+
+  planBin.delete(); inv.delete(); dist.delete(); ifcBin.delete();
+
+  if (!d.length) return { mean: Infinity, median: Infinity, p90: Infinity };
+
+  d.sort((a, b) => a - b);
+  const cutIdx = Math.floor((trimQ / 100) * (d.length - 1));
+  const cutoff = d[cutIdx];
+  const kept = d.filter((v) => v <= cutoff);
+
+  const mean = kept.reduce((s, v) => s + v, 0) / kept.length;
+  const median = kept[Math.floor(kept.length / 2)];
+  const p90 = kept[Math.floor(0.9 * (kept.length - 1))];
+
+  return { mean, median, p90, cutoff, n: d.length, nUsed: kept.length, trimQ };
+}
+
 async function boot() {
   const container = document.getElementById("container") as HTMLDivElement;
   const calibrateBtn = document.getElementById("calibrate") as HTMLButtonElement;
+  const autoAlignBtn = document.getElementById("autoAlign") as HTMLButtonElement;
   const resetPlanBtn = document.getElementById("resetPlan") as HTMLButtonElement;
   const statusEl = document.getElementById("status") as HTMLSpanElement;
 
@@ -620,6 +884,7 @@ function collectPickableMeshes(root: THREE.Object3D): THREE.Mesh[] {
   function updateOverlayButtons() {
     const has = overlays.length > 0;
     calibrateBtn.disabled = !has;
+    autoAlignBtn.disabled = !has;
     resetPlanBtn.disabled = !has;
     floorSelect.disabled = !has;
     focusPlanBtn.disabled = !has;
@@ -2045,9 +2310,294 @@ function applyCalibrationToOverlay(overlay: PlanOverlay, sol: Similarity2D) {
   setStatus("Loaded ✅  Use Floor selector / Opacity / Tools / Calibrate.");
 }
 
+// ------------------------
+// IFC edges raster (feature-edges equivalent)
+// ------------------------
+function disposeEdgeScene(scene: THREE.Scene) {
+  scene.traverse((obj: any) => {
+    if (obj?.isLineSegments) {
+      obj.geometry?.dispose?.();
+      // material may be shared; dispose once later if you track it
+    }
+  });
+  // best effort: dispose unique materials
+  const mats = new Set<any>();
+  scene.traverse((obj: any) => {
+    const m = (obj as any).material;
+    if (m) mats.add(m);
+  });
+  mats.forEach((m: any) => m?.dispose?.());
+}
+
+function buildIfcEdgeScene(thresholdAngleDeg = 25): THREE.Scene {
+  if (!currentModel) throw new Error("No IFC model");
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
+
+  const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff });
+  const cache = new Map<string, THREE.EdgesGeometry>();
+
+  currentModel.object.updateWorldMatrix(true, true);
+
+  currentModel.object.traverse((obj: any) => {
+    if (!obj?.isMesh) return;
+    const g: any = obj.geometry;
+    if (!g?.isBufferGeometry) return;
+
+    // reuse edges geom by geometry uuid
+    let eg = cache.get(g.uuid);
+    if (!eg) {
+      eg = new THREE.EdgesGeometry(g, thresholdAngleDeg);
+      cache.set(g.uuid, eg);
+    }
+
+    const ls = new THREE.LineSegments(eg, lineMat);
+    ls.matrixAutoUpdate = false;
+    ls.matrix.copy(obj.matrixWorld);
+    scene.add(ls);
+  });
+
+  return scene;
+}
+
+async function rasterizeIfcEdgesTopDown(
+  overlay: PlanOverlay,
+  outSize = 1024,
+  margin = 10
+): Promise<{ edges: any; A_ifc: Mat3; invA_ifc: Mat3; outCanvas: HTMLCanvasElement }> {
+  if (!currentModel || !lastBBox) throw new Error("No model/bbox");
+
+  // Use storey clipping band while rendering (align THIS floor, not whole building)
+  const prevIso = filter.isolateStorey;
+  const prevBand = filter.isolateBand;
+
+  try {
+    filter.isolateStorey = true;
+    filter.isolateBand = Math.max(1.5, prevBand);
+    applyStoreyClipping();
+
+    const bb = lastBBox;
+    const center = new THREE.Vector3();
+    bb.getCenter(center);
+
+    const w = bb.max.x - bb.min.x;
+    const d = bb.max.z - bb.min.z;
+    const span = Math.max(w, d) * 1.10; // padding
+
+    // World square in XZ
+    const x0 = center.x - span / 2;
+    const z0 = center.z - span / 2;
+    const zMax = center.z + span / 2;
+
+    const scale = (outSize - 2 * margin) / span;
+
+    // A_ifc maps world (x,z,1) -> out pixels (px,py,1)
+    // py uses (zMax - z) to flip "up" to pixel-down
+    const A_ifc: Mat3 = [
+      scale,  0,      margin - scale * x0,
+      0,     -scale,  margin + scale * zMax,
+      0,      0,      1,
+    ];
+    const invA_ifc = mat3Inv(A_ifc);
+
+    // Build edge-only scene
+    const edgeScene = buildIfcEdgeScene(25);
+
+    // Ortho camera top-down (looking -Y), with Z as "up" in view
+    const cam = new THREE.OrthographicCamera(-span / 2, span / 2, span / 2, -span / 2, 0.1, 1e6);
+    cam.position.set(center.x, bb.max.y + 50, center.z);
+    cam.up.set(0, 0, 1);
+    cam.lookAt(center.x, overlay.worldY ?? center.y, center.z);
+    cam.updateProjectionMatrix();
+
+    const renderer = world.renderer.three as THREE.WebGLRenderer;
+    const rt = new THREE.WebGLRenderTarget(outSize, outSize, { depthBuffer: false, stencilBuffer: false });
+
+    renderer.setRenderTarget(rt);
+    renderer.clear(true, true, true);
+    renderer.render(edgeScene, cam);
+
+    const buf = new Uint8Array(outSize * outSize * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, outSize, outSize, buf);
+    renderer.setRenderTarget(null);
+
+    rt.dispose();
+    disposeEdgeScene(edgeScene);
+
+    // WebGL pixels are bottom-up → flip into canvas top-down
+    const c = document.createElement("canvas");
+    c.width = outSize;
+    c.height = outSize;
+    const ctx = c.getContext("2d")!;
+    const imgData = ctx.createImageData(outSize, outSize);
+
+    for (let y = 0; y < outSize; y++) {
+      const srcY = outSize - 1 - y;
+      for (let x = 0; x < outSize; x++) {
+        const si = (srcY * outSize + x) * 4;
+        const di = (y * outSize + x) * 4;
+        imgData.data[di + 0] = buf[si + 0];
+        imgData.data[di + 1] = buf[si + 1];
+        imgData.data[di + 2] = buf[si + 2];
+        imgData.data[di + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    // OpenCV: grayscale + threshold to get binary edges + dilate
+    const rgba = cv.imread(c);
+    const gray = new cv.Mat();
+    cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
+
+    const bin = new cv.Mat();
+    cv.threshold(gray, bin, 10, 255, cv.THRESH_BINARY);
+
+    const k = cv.Mat.ones(3, 3, cv.CV_8U);
+    const dil = new cv.Mat();
+    cv.dilate(bin, dil, k, new cv.Point(-1, -1), 1);
+
+    rgba.delete(); gray.delete(); bin.delete(); k.delete();
+
+    return { edges: dil, A_ifc, invA_ifc, outCanvas: c };
+  } finally {
+    // restore clipping state
+    filter.isolateStorey = prevIso;
+    filter.isolateBand = prevBand;
+    applyStoreyClipping();
+  }
+}
+
+// ------------------------
+// The one function you actually want: Auto-align current overlay (ECC)
+// ------------------------
+async function autoAlignCurrentFloorECC() {
+  if (!currentModel || overlays.length === 0) return;
+
+  await ensureOpenCV();
+
+  const idx = parseInt(floorSelect.value || "0", 10) || 0;
+  const overlay = overlays[idx];
+
+  setStatus("Auto-align: rasterizing edges...");
+  const outSize = 1024;
+
+  const plan = await rasterizePlanEdges(overlay, outSize, 10);
+  const ifc = await rasterizeIfcEdgesTopDown(overlay, outSize, 10);
+
+  setStatus("Auto-align: ECC (AFFINE → EUCLIDEAN)...");
+  const aff = eccAlign(ifc.edges, plan.edges, cv.MOTION_AFFINE, 2500);
+  const rig = eccAlign(aff.aligned, plan.edges, cv.MOTION_EUCLIDEAN, 1500);
+
+  const cham = trimmedChamfer(rig.aligned, plan.edges, 90);
+
+  const W = warp2x3ToMat3(rig.warp); // warp in OUT-pixel space
+  const invW = mat3Inv(W);
+
+  // Candidate directions
+  const T1 = mat3Mul(mat3Mul(ifc.invA_ifc, W), plan.A_plan);
+  const T2 = mat3Mul(mat3Mul(ifc.invA_ifc, invW), plan.A_plan);
+
+  setStatus("Auto-align: sampling edges + solving overlay transform...");
+
+  // Sample plan edges: OUT -> plan pixels -> (planLocal, modelXZ)
+  const planLocals: THREE.Vector3[] = [];
+  const planPix: { x: number; y: number }[] = [];
+
+  const step = 6;
+  const maxSamples = 500;
+
+  for (let y = 0; y < plan.edges.rows; y += step) {
+    for (let x = 0; x < plan.edges.cols; x += step) {
+      if (plan.edges.ucharPtr(y, x)[0] === 0) continue;
+
+      const pPix = applyH(plan.invA_plan, x, y);
+      if (!isFinite(pPix.x) || !isFinite(pPix.y)) continue;
+
+      // keep only points that land inside original image bounds
+      if (pPix.x < 0 || pPix.y < 0 || pPix.x > overlay.imgW || pPix.y > overlay.imgH) continue;
+
+      const local = pixelToLocalOnPlan(overlay, pPix.x, pPix.y);
+      planLocals.push(local);
+      planPix.push(pPix);
+
+      if (planLocals.length >= maxSamples) break;
+    }
+    if (planLocals.length >= maxSamples) break;
+  }
+
+  if (planLocals.length < 20) {
+    setStatus("Auto-align failed: not enough edge samples. Try a cleaner plan page.");
+
+    // cleanup
+    plan.edges.delete(); ifc.edges.delete();
+    aff.warp.delete(); aff.aligned.delete();
+    rig.warp.delete(); rig.aligned.delete();
+    return;
+  }
+
+  function evalCandidate(T: Mat3) {
+    const modelPts: THREE.Vector2[] = planPix.map((p) => {
+      const m = applyH(T, p.x, p.y);
+      return new THREE.Vector2(m.x, m.y); // y is worldZ
+    });
+
+    const res = solve3ptWithAutoFlip(overlay, planLocals, modelPts);
+    if (!res) return null;
+
+    const plan2D = planLocals.map((p) => planLocalTo2D(overlay, p, res.shouldToggleFlipX));
+    const err = rmsError(res.sol, plan2D, modelPts);
+    if (!isFinite(err)) return null;
+
+    return { res, err };
+  }
+
+  const e1 = evalCandidate(T1);
+  const e2 = evalCandidate(T2);
+
+  const chosen =
+    e1 && e2 ? (e1.err <= e2.err ? { ...e1, which: "T1" as const } : { ...e2, which: "T2" as const }) :
+    e1 ? { ...e1, which: "T1" as const } :
+    e2 ? { ...e2, which: "T2" as const } :
+    null;
+
+  if (!chosen) {
+    setStatus("Auto-align failed: similarity solve failed (both directions).");
+
+    plan.edges.delete(); ifc.edges.delete();
+    aff.warp.delete(); aff.aligned.delete();
+    rig.warp.delete(); rig.aligned.delete();
+    return;
+  }
+
+  // Apply result
+  if (chosen.res.shouldToggleFlipX) {
+    setPlanFlipX(overlay, !getPlanFlipX(overlay));
+  }
+
+  applyCalibrationToOverlay(overlay, chosen.res.sol);
+  saveOverlayTransform(idx);
+
+  setStatus(
+    `Auto-align saved ✅ (ECC cc=${(rig.cc?.toFixed?.(4) ?? rig.cc)}, chamferMean≈${cham.mean.toFixed(2)}px, rms≈${chosen.err.toFixed(2)} [${chosen.which}])`
+  );
+  refreshCurrentFloor(true);
+
+  // cleanup cv mats
+  plan.edges.delete(); ifc.edges.delete();
+  aff.warp.delete(); aff.aligned.delete();
+  rig.warp.delete(); rig.aligned.delete();
+}
+
   // ------------------------
   // UI events
   // ------------------------
+  autoAlignBtn.addEventListener("click", () =>
+  autoAlignCurrentFloorECC().catch((e) => {
+    console.error(e);
+    setStatus(`Auto-align error: ${String((e as any)?.message ?? e)}`);
+  })
+);
   opacitySlider.addEventListener("input", () => {
     const value = parseFloat(opacitySlider.value);
     overlays.forEach((o) => (o.material.opacity = value));
