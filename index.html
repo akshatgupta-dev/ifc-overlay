@@ -67,7 +67,10 @@
 
       <div id="container"></div>
     </div>
-    <script async src="/opencv/opencv.js"></script>
+    <script>
+  window.Module = { locateFile: (p) => "/opencv/" + p };
+</script>
+<script src="/opencv/opencv.js"></script>
     <script src="/ort/ort.wasm.min.js"></script>
     <script type="module" src="/src/main.ts"></script>
   </body>
