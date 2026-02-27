@@ -14,13 +14,11 @@
     "typescript": "~5.9.3",
     "vite": "^7.3.1"
   },
-  
- 
-
   "dependencies": {
     "@thatopen/components": "^3.3.2",
     "@thatopen/fragments": "^3.3.5",
     "onnxruntime-web": "^1.24.2",
+    "opencv-js-wasm": "^5.0.0-alpha",
     "pdfjs-dist": "^5.4.624",
     "three": "^0.183.0",
     "web-ifc": "^0.0.75"

@@ -68,7 +68,11 @@
       <div id="container"></div>
     </div>
     <script>
-  window.Module = { locateFile: (p) => "/opencv/" + p };
+  var Module = {
+    onRuntimeInitialized() {
+      console.log("OpenCV ready", typeof Module.findTransformECC);
+    }
+  };
 </script>
 <script src="/opencv/opencv.js"></script>
     <script src="/ort/ort.wasm.min.js"></script>
