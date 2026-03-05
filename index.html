@@ -67,9 +67,19 @@
 
       <div id="container"></div>
     </div>
-    <script>
+    <!-- <script>
   var Module = {
     onRuntimeInitialized() {
+      console.log("OpenCV ready", typeof Module.findTransformECC);
+    }
+  };
+</script>
+<script src="/opencv/opencv.js"></script> -->
+<script>
+  var Module = {
+    onRuntimeInitialized() {
+      // ✅ make it accessible as `window.cv`
+      window.cv = Module;
       console.log("OpenCV ready", typeof Module.findTransformECC);
     }
   };
