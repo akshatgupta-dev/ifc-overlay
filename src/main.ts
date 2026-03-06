@@ -765,7 +765,7 @@ async function boot() {
     console.log("[STATUS]", msg);
   }
 
-  const detector = new YoloBrowserDetector("/models/electrical.onnx", 640);
+  const detector = new YoloBrowserDetector(import.meta.env.BASE_URL + "models/electrical.onnx";, 640);
 
   // ------------------------
   // Panels (Props + Tools)
