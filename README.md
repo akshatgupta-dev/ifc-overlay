@@ -1,8 +1,8 @@
-# IFC Overlay 🏗️
+# IFC Overlay 
 
 A Building Information Modeling (BIM) automation pipeline tool designed to seamlessly align, calibrate, and overlay 2D floor plans (PDFs) onto 3D IFC models. This project utilizes in-browser Machine Learning (via ONNX Runtime) to handle automated element detection and mathematical alignment techniques to precisely position 2D overlays into 3D coordinate spaces.
 
-## ✨ Features
+## Features
 * **Interactive 3D Environment:** Built with Three.js to render 3D BIM data and visual overlays.
 * **Automated 2D-to-3D Calibration:** Calculates transformation matrices (translation, rotation, scaling) using Least Squares algorithms to map 2D plan coordinates to 3D model points.
 * **Auto-Flip Detection:** Automatically detects if a floor plan is mirrored and mathematically corrects the orientation.
@@ -10,14 +10,14 @@ A Building Information Modeling (BIM) automation pipeline tool designed to seaml
 * **PDF Rendering:** Built-in tools (`pdf_render.ts`) to handle and display PDF construction documents as overlay textures.
 * **Fast Development:** Powered by Vite and TypeScript for instantaneous Hot Module Replacement (HMR) and strict type-safety.
 
-## 💻 Tech Stack
+## Tech Stack
 * **Core Framework:** TypeScript, HTML5
 * **Build Tool:** [Vite](https://vitejs.dev/)
 * **3D Rendering:** [Three.js](https://threejs.org/)
 * **Machine Learning:** ONNX Runtime Web (`ort-web`), YOLO 
 * **BIM / PDF Handling:** Custom automation pipeline
 
-## 📂 Folder Structure
+## Folder Structure
 
 ```markdown
 ifc-overlay/
@@ -33,7 +33,7 @@ ifc-overlay/
 ```
 
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -79,7 +79,7 @@ npm run build
 
 The optimized files will be output to the `dist/` directory.
 
-## 🧠 How the Calibration Works
+## How the Calibration Works
 
 The core logic relies on identifying matching "anchor points" between the 2D Plan (`planLocals`) and the 3D Model (`modelPts`).
 
@@ -87,6 +87,6 @@ The core logic relies on identifying matching "anchor points" between the 2D Pla
 2. It evaluates both the standard orientation and a mirrored (flipped) orientation using a Least Squares error function.
 3. The fit with the lowest Root Mean Square (RMS) error is automatically selected and applied to the `PlanOverlay` mesh in the Three.js scene.
 
-## 📄 License
+## License
 
 This project is proprietary. All rights reserved.
