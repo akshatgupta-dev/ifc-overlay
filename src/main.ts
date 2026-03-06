@@ -2651,6 +2651,7 @@ function applyCalibrationToOverlay(overlay: PlanOverlay, sol: Similarity2D) {
       progressCallback: (p) => console.log("IFC conversion progress:", p),
     },
   });
+    console.log("✅ IFC LOAD PROMISE RESOLVED!", currentModel);
   pickableModelMeshes = collectPickableMeshes(currentModel.object);
   console.log("Pickable model meshes:", pickableModelMeshes.length);
   (raycaster as any).firstHitOnly = true;
