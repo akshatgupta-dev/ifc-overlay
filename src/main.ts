@@ -903,6 +903,7 @@ function setGridVisible(g: any, vis: boolean) {
  wasm: { path: import.meta.env.BASE_URL + "wasm/", absolute: true },
   webIfc: {
     COORDINATE_TO_ORIGIN: true,
+    mt:false;
   },
 });
 
@@ -2646,11 +2647,11 @@ function applyCalibrationToOverlay(overlay: PlanOverlay, sol: Similarity2D) {
   }
 
   // 3) Load IFC into viewer
-  currentModel = await ifcLoader.load(ifcBytes, false, ifcFile.name, {
-    processData: {
-      progressCallback: (p) => console.log("IFC conversion progress:", p),
-    },
-  });
+  // currentModel = await ifcLoader.load(ifcBytes, false, ifcFile.name, {
+  //   processData: {
+  //     progressCallback: (p) => console.log("IFC conversion progress:", p),
+  //   },
+  // });
     console.log("✅ IFC LOAD PROMISE RESOLVED!", currentModel);
   pickableModelMeshes = collectPickableMeshes(currentModel.object);
   console.log("Pickable model meshes:", pickableModelMeshes.length);
