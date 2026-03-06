@@ -3749,7 +3749,7 @@ async function autoAlignViaBackend() {
   formData.append("pdf", overlay.originalPdfFile);
 
   try {
-    const response = await fetch("https://your-api-name.onrender.com/api/align", {
+    const response = await fetch("https://bim2-api-rasterize-1.onrender.com/api/align", {
       method: "POST",
       body: formData,
     });
