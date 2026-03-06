@@ -916,23 +916,53 @@ function setGridVisible(g: any, vis: boolean) {
   // ---- NEW: safe model picking cache (avoids broken fragment meshes) ----
 let pickableModelMeshes: THREE.Mesh[] = [];
 
-function collectPickableMeshes(root: THREE.Object3D): THREE.Mesh[] {
+// function collectPickableMeshes(root: THREE.Object3D): THREE.Mesh[] {
+//   const out: THREE.Mesh[] = [];
+
+//   root.traverse((obj) => {
+//     const m: any = obj;
+//     if (!m?.isMesh) return;
+
+//     const g: any = m.geometry;
+//     if (!g || !g.isBufferGeometry) return;
+
+//     const pos: any = g.getAttribute?.("position") ?? g.attributes?.position;
+//     const arr: any = pos?.array;
+
+//     // Skip broken / zero-length geometries that can crash acceleratedRaycast
+//     if (!pos || !arr || typeof arr.length !== "number" || arr.length < 9) return;
+
+//     out.push(m as THREE.Mesh);
+//   });
+
+//   return out;
+// }
+
+  function collectPickableMeshes(rootLike: any): THREE.Mesh[] {
+  const root =
+    rootLike?.isObject3D ? rootLike :
+    rootLike?.object?.isObject3D ? rootLike.object :
+    null;
+
+  if (!root) {
+    console.warn("collectPickableMeshes: expected Object3D, got:", rootLike);
+    return [];
+  }
+
   const out: THREE.Mesh[] = [];
 
-  root.traverse((obj) => {
-    const m: any = obj;
-    if (!m?.isMesh) return;
+  root.traverse((obj: any) => {
+    if (!obj?.isMesh) return;
 
-    const g: any = m.geometry;
+    const g: any = obj.geometry;
     if (!g || !g.isBufferGeometry) return;
 
     const pos: any = g.getAttribute?.("position") ?? g.attributes?.position;
     const arr: any = pos?.array;
 
-    // Skip broken / zero-length geometries that can crash acceleratedRaycast
     if (!pos || !arr || typeof arr.length !== "number" || arr.length < 9) return;
 
-    out.push(m as THREE.Mesh);
+    out.push(obj as THREE.Mesh);
   });
 
   return out;
