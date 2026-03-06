@@ -29,7 +29,7 @@ jobs:
         run: npm install
         
       - name: Build project
-        run: npm run build
+        run: npx vite build
         
       - name: Upload production-ready artifacts
         uses: actions/upload-pages-artifact@v3
