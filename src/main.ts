@@ -900,7 +900,7 @@ function setGridVisible(g: any, vis: boolean) {
   const ifcLoader = components.get(OBC.IfcLoader);
   await ifcLoader.setup({
   autoSetWasm: false,
-  wasm: { path: "/wasm/", absolute: false },
+ wasm: { path: import.meta.env.BASE_URL + "wasm/", absolute: true },
   webIfc: {
     COORDINATE_TO_ORIGIN: true,
   },
