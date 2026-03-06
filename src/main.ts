@@ -899,9 +899,12 @@ function setGridVisible(g: any, vis: boolean) {
   // web-ifc loader
   const ifcLoader = components.get(OBC.IfcLoader);
   await ifcLoader.setup({
-    autoSetWasm: false,
-    wasm: { path: "/wasm/", absolute: false },
-  });
+  autoSetWasm: false,
+  wasm: { path: "/wasm/", absolute: false },
+  webIfc: {
+    COORDINATE_TO_ORIGIN: true,
+  },
+});
 
   // ------------------------
   // Interaction helpers
@@ -1172,7 +1175,48 @@ let currentIfcFile: File | null = null; // <--- ADDED
     
     return toolsPanel;
   }
+  function focusCameraToModel(pad = 2.5) {
+  if (!currentModel) return;
 
+  // While debugging: avoid clipping hiding everything
+  filter.isolateStorey = false;
+  applyStoreyClipping();
+
+  const obj = currentModel.object;
+  obj.updateWorldMatrix(true, true);
+
+  const bb = new THREE.Box3().setFromObject(obj);
+  const center = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  bb.getCenter(center);
+  bb.getSize(size);
+
+  const span = Math.max(size.x, size.y, size.z);
+  const dist = Math.max(10, span * pad);
+
+  const cam: any = world.camera.three;
+
+  // Fix clipping so you don’t get “black screen”
+  cam.near = Math.max(0.01, dist / 1000);
+  cam.far = dist * 2000;
+
+  // VERY IMPORTANT for OrthoPerspectiveCamera: reset zoom if ortho
+  if (cam.isOrthographicCamera) {
+    cam.zoom = 1;
+  }
+  cam.updateProjectionMatrix?.();
+
+  // Move camera to a diagonal vantage point
+  world.camera.controls.setLookAt(
+    center.x + dist,
+    center.y + dist,
+    center.z + dist,
+    center.x,
+    center.y,
+    center.z,
+    true
+  );
+}
   // ------------------------
   // Clipping (storey isolate)
   // ------------------------
@@ -1560,7 +1604,7 @@ function loadOverlayTransform(idx: number): boolean {
       typeof data.rotY === "number" && isFinite(data.rotY) ? data.rotY : o.baseRotY;
 
     const s = typeof data.scale === "number" && isFinite(data.scale) ? data.scale : o.baseScale;
-    o.mesh.scale.set(s, 1, s);
+    o.mesh.scale.set(s, s, s);
 
     setPlanFlipX(o, !!data.flipX);
     return true;
@@ -1575,10 +1619,12 @@ function loadOverlayTransform(idx: number): boolean {
 
     o.mesh.position.copy(o.basePos);
     o.mesh.rotation.y = o.baseRotY;
-    o.mesh.scale.set(o.baseScale, 1, o.baseScale);
+    o.mesh.scale.set(o.baseScale, o.baseScale, o.baseScale);
 
     setPlanFlipX(o, false);
-    refreshCurrentFloor(true);
+    // refreshCurrentFloor(true);
+    // after applying backend align + refreshCurrentFloor(true)
+// flyToWorldPoint(new THREE.Vector3(mc.x, overlay.worldY, mc.z));
   }
 
   // ------------------------
@@ -1765,7 +1811,13 @@ function loadOverlayTransform(idx: number): boolean {
 
     currentModel.object.visible = true;
 
-    const bb = lastBBox ?? new THREE.Box3().setFromObject(currentModel.object);
+    // const bb = lastBBox ?? new THREE.Box3().setFromObject(currentModel.object);
+    const bb = new THREE.Box3().setFromObject(currentModel.object);
+    
+
+    const c = new THREE.Vector3(); 
+    bb.getCenter(c);
+    console.log("MODEL bbox center", c.x, c.z);
     const size = new THREE.Vector3();
     const center = new THREE.Vector3();
     bb.getSize(size);
@@ -2193,7 +2245,7 @@ function applyCalibrationToOverlay(overlay: PlanOverlay, sol: Similarity2D) {
 
   overlay.mesh.position.set(sol.t.x, y, sol.t.y);
   overlay.mesh.rotation.set(0, overlay.baseRotY + sol.theta, 0);
-  overlay.mesh.scale.set(s, 1, s);
+  overlay.mesh.scale.set(s, s, s);
 }
 
   // ------------------------
@@ -2758,6 +2810,52 @@ function applyCalibrationToOverlay(overlay: PlanOverlay, sol: Similarity2D) {
   updateOverlayButtons();
   applyStoreyClipping();
   setStatus("Loaded ✅  Use Floor selector / Opacity / Tools / Calibrate.");
+
+  function focusCameraToModel(opts?: { pad?: number }) {
+  if (!currentModel) return;
+
+  // While debugging, disable clipping so you don't "focus into nothing"
+  filter.isolateStorey = false;
+  applyStoreyClipping();
+
+  const obj = currentModel.object;
+  obj.updateWorldMatrix(true, true);
+
+  const bb = new THREE.Box3().setFromObject(obj);
+  const center = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  bb.getCenter(center);
+  bb.getSize(size);
+
+  const span = Math.max(size.x, size.y, size.z);
+  const pad = opts?.pad ?? 2.0;
+  const dist = Math.max(10, span * pad);
+
+  // Fix clipping planes (this prevents black screen from clipping)
+  const cam: any = world.camera.three;
+  cam.near = Math.max(0.01, dist / 1000);
+  cam.far = dist * 2000;
+  if (cam.updateProjectionMatrix) cam.updateProjectionMatrix();
+
+  // Reset ortho zoom if you're in ortho mode (common reason for "black screen")
+  if (cam.isOrthographicCamera) {
+    cam.zoom = 1;
+    cam.updateProjectionMatrix();
+  }
+
+  // Put camera on diagonal above model and look at model center
+  world.camera.controls.setLookAt(
+    center.x + dist,
+    center.y + dist,
+    center.z + dist,
+    center.x,
+    center.y,
+    center.z,
+    true
+  );
+      focusCameraToModel({ pad: 2.5 });
+
+}
 }
 
 // ------------------------
@@ -3564,22 +3662,22 @@ async function rasterizeIfcEdgesTopDownNormals(
 async function autoAlignViaBackend() {
   const idx = parseInt(floorSelect.value || "0", 10) || 0;
   const overlay = overlays[idx];
-  
-  if (!currentIfcFile || !overlay.originalPdfFile) {
+
+  if (!currentIfcFile || !overlay.originalPdfFile || !currentModel) {
     setStatus("Auto-align requires the original IFC and PDF files.");
     return;
   }
 
   setStatus("Auto-align: Sending files to backend for vector alignment...");
-  
+
   const formData = new FormData();
   formData.append("ifc", currentIfcFile);
-  formData.append("pdf", overlay.originalPdfFile); 
+  formData.append("pdf", overlay.originalPdfFile);
 
   try {
     const response = await fetch("http://localhost:8000/api/align", {
       method: "POST",
-      body: formData
+      body: formData,
     });
 
     const data = await response.json();
@@ -3587,80 +3685,167 @@ async function autoAlignViaBackend() {
 
     const { tl, tr, br, bl } = data.corners;
 
-   // 1. Map to TRUE GLOBAL WebGL coordinates!
-    // IFC X -> WebGL X
-    // IFC Y (North) -> WebGL -Z (Depth)
-    // IFC Z (Elevation) -> WebGL Y (Up)
-    const TL = new THREE.Vector3(tl[0], 0, -tl[1]);
-    const TR = new THREE.Vector3(tr[0], 0, -tr[1]);
-    const BR = new THREE.Vector3(br[0], 0, -br[1]);
-    const BL = new THREE.Vector3(bl[0], 0, -bl[1]);
+    // -----------------------------
+    // 0) Get model center in VIEWER coordinates (XZ)
+    // -----------------------------
+    const bb = new THREE.Box3().setFromObject(currentModel.object);
+    const mc = new THREE.Vector3();
+    bb.getCenter(mc);
+    // mc.x, mc.z are what we want
 
-    // 2. Apply That Open Engine's coordination matrix
-    // OBC translates the global WebGL coordinates to (0,0,0) to prevent precision glitches.
-    // invCoord perfectly undoes this translation, bringing our PDF corners to the exact local center.
-    const fg = (currentModel as any)?.object || currentModel;
-    if (fg && fg.coordinationMatrix) {
-      const coordMat = new THREE.Matrix4().fromArray(fg.coordinationMatrix);
-      const invCoord = coordMat.invert();
-      
-      TL.applyMatrix4(invCoord);
-      TR.applyMatrix4(invCoord);
-      BR.applyMatrix4(invCoord);
-      BL.applyMatrix4(invCoord);
+    // -----------------------------
+    // 1) Convert backend corners -> Three.js ground plane coords (XZ)
+    // Backend returns [x, z] in IFC 2D (actually IFC X,Y on plan)
+    // We map: IFC X -> Three X, IFC Y -> Three Z (with a sign flip often needed)
+    //
+    // Use the same convention you previously had commented:
+    // IFC Y -> WebGL -Z
+    // -----------------------------
+    const TL0 = new THREE.Vector3(tl[0], 0, -tl[1]);
+    const TR0 = new THREE.Vector3(tr[0], 0, -tr[1]);
+    const BR0 = new THREE.Vector3(br[0], 0, -br[1]);
+    const BL0 = new THREE.Vector3(bl[0], 0, -bl[1]);
+
+    // -----------------------------
+    // 2) Apply coordinationMatrix if available.
+    // Some loaders store points in a "coordinated" local space.
+    // We'll try BOTH directions (C and C^-1) and pick the one
+    // that places the plan center closer to the model center.
+    // -----------------------------
+    
+
+    function planCenterXZ(a: THREE.Vector3, c: THREE.Vector3, b?: THREE.Vector3, d?: THREE.Vector3) {
+      // average of 4 corners if given; else diagonal midpoint
+      if (b && d) {
+        return new THREE.Vector3(
+          (a.x + b.x + c.x + d.x) * 0.25,
+          0,
+          (a.z + b.z + c.z + d.z) * 0.25
+        );
+      }
+      return new THREE.Vector3((a.x + c.x) * 0.5, 0, (a.z + c.z) * 0.5);
     }
 
-    // 3. Reset arbitrary UI flips
+    function distXZ(p: THREE.Vector3, q: THREE.Vector3) {
+      const dx = p.x - q.x;
+      const dz = p.z - q.z;
+      return Math.hypot(dx, dz);
+    }
+
+    let TL = TL0.clone();
+    let TR = TR0.clone();
+    let BR = BR0.clone();
+    let BL = BL0.clone();
+const fg: any = currentModel.object;
+if (fg?.coordinationMatrix) {
+  const C = new THREE.Matrix4().fromArray(fg.coordinationMatrix);
+  TL.applyMatrix4(C);
+  TR.applyMatrix4(C);
+  BR.applyMatrix4(C);
+  BL.applyMatrix4(C);
+}
+    if (fg && fg.coordinationMatrix) {
+      const C = new THREE.Matrix4().fromArray(fg.coordinationMatrix);
+
+      // candidate A: apply C
+      const TL_A = TL0.clone().applyMatrix4(C);
+      const TR_A = TR0.clone().applyMatrix4(C);
+      const BR_A = BR0.clone().applyMatrix4(C);
+      const BL_A = BL0.clone().applyMatrix4(C);
+      const pcA = planCenterXZ(TL_A, BR_A, TR_A, BL_A);
+      const dA = distXZ(pcA, mc);
+
+      // candidate B: apply C^-1
+      const Cinv = C.clone().invert();
+      const TL_B = TL0.clone().applyMatrix4(Cinv);
+      const TR_B = TR0.clone().applyMatrix4(Cinv);
+      const BR_B = BR0.clone().applyMatrix4(Cinv);
+      const BL_B = BL0.clone().applyMatrix4(Cinv);
+      const pcB = planCenterXZ(TL_B, BR_B, TR_B, BL_B);
+      const dB = distXZ(pcB, mc);
+
+      // pick the closer
+      if (dA <= dB) {
+        TL = TL_A; TR = TR_A; BR = BR_A; BL = BL_A;
+      } else {
+        TL = TL_B; TR = TR_B; BR = BR_B; BL = BL_B;
+      }
+    }
+
+    // -----------------------------
+    // 3) RECENTER: bring plan onto the model center in viewer space.
+    // This "undoes" global translation so the overlay doesn't land far away.
+    // -----------------------------
+    const pc = planCenterXZ(TL, BR, TR, BL);
+    const dx = mc.x - pc.x;
+    const dz = mc.z - pc.z;
+
+    TL.x += dx; TL.z += dz;
+    TR.x += dx; TR.z += dz;
+    BR.x += dx; BR.z += dz;
+    BL.x += dx; BL.z += dz;
+
+    // -----------------------------
+    // 4) Reset arbitrary UI flips/rotations (so we don't fight old state)
+    // -----------------------------
     setPlanFlipX(overlay, false);
     overlay.rotate90 = false;
 
-    // 2. Rebuild the geometry natively (FIXED TS errors using 'as any')
+    // -----------------------------
+    // 5) Rebuild geometry (keep your approach: geometry in pixel units + scale)
+    // -----------------------------
     const tex = overlay.material.map;
     const imgW = Number((tex?.image as any)?.width ?? 1);
     const imgH = Number((tex?.image as any)?.height ?? 1);
-    
+
     overlay.planeW = imgW;
     overlay.planeD = imgH;
 
     overlay.mesh.geometry.dispose();
     const newGeom = new THREE.PlaneGeometry(imgW, imgH, 1, 1);
     newGeom.rotateX(-Math.PI / 2);
-    
-    // Prevent Three.js frustum culling from hiding the new geometry
     newGeom.computeBoundingBox();
     newGeom.computeBoundingSphere();
     overlay.mesh.geometry = newGeom;
 
-    // 3. Build a perfect 4x4 transformation matrix from the corners
-    // This allows Three.js to handle independent X/Z scaling natively
-    const xAxis = new THREE.Vector3().subVectors(TR, TL).divideScalar(imgW);
-    const zAxis = new THREE.Vector3().subVectors(BL, TL).divideScalar(imgH);
-    const yAxis = new THREE.Vector3(0, 1, 0);
-
+    // -----------------------------
+    // 6) Apply rigid transform from corners:
+    // - position = center (XZ), Y = storey elevation
+    // - scale = (world width) / imgW
+    // - rotation = yaw from TL->TR direction
+    // -----------------------------
     const center = new THREE.Vector3().addVectors(TL, BR).multiplyScalar(0.5);
 
-    const mat = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
-    mat.setPosition(center.x, overlay.basePos.y, center.z); 
+    const worldWidth = TL.distanceTo(TR);
+    const scale = worldWidth / Math.max(1e-9, imgW);
 
-    // 4. Apply the matrix and decompose it into standard properties
-    // This perfectly maps the PDF without forcing it into a slanted shape!
-    overlay.mesh.matrix.copy(mat);
-    overlay.mesh.matrix.decompose(overlay.mesh.position, overlay.mesh.quaternion, overlay.mesh.scale);
+    overlay.mesh.scale.set(scale, scale, scale);
 
-    console.log("Applied Transform natively from Matrix:", overlay.mesh.scale, overlay.mesh.rotation);
+    // keep plane at correct storey height
+    overlay.mesh.position.set(center.x, overlay.worldY - 0.01, center.z);
+
+    // yaw rotation
+    overlay.mesh.rotation.set(0, 0, 0);
+    const dir = new THREE.Vector3().subVectors(TR, TL).normalize();
+    const angle = Math.atan2(dir.z, dir.x); // yaw in XZ
+    overlay.mesh.rotation.y = angle;
+
+    console.log("Applied Backend Align (recentering enabled)", {
+      modelCenter: { x: mc.x, z: mc.z },
+      planCenterBefore: { x: pc.x, z: pc.z },
+      delta: { dx, dz },
+      centerAfter: { x: center.x, z: center.z },
+      scale,
+      angle,
+      usedCoordinationMatrix: !!(fg && fg.coordinationMatrix),
+    });
 
     saveOverlayTransform(idx);
     refreshCurrentFloor(true);
-    
-    setStatus("Auto-align complete ✅ (Perfect Match)");
-
-    console.log("Applied Transform:", { center, scale, angle });
-
-    saveOverlayTransform(idx);
-    refreshCurrentFloor(true);
-    
-    setStatus("Auto-align complete ✅ (Perfect Match)");
-
+    // after applying backend align + refreshCurrentFloor(true)
+    focusCameraToModel(2.0);
+    setStatus("Auto-align complete ✅ (recentered to model)");
+  
   } catch (error) {
     console.error(error);
     setStatus("Auto-align failed. Check backend logs.");
