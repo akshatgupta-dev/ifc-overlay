@@ -867,7 +867,8 @@ function setGridVisible(g: any, vis: boolean) {
 }
   // Fragments worker
   const fragments = components.get(OBC.FragmentsManager);
-  fragments.init("/worker.mjs");
+  // fragments.init("/worker.mjs");
+  fragments.init(import.meta.env.BASE_URL + "worker.mjs");
 
   // Track materials so we can clip them reliably
   const allModelMaterials = new Set<any>();
