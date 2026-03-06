@@ -160,7 +160,7 @@ export class YoloBrowserDetector {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
-      ort.env.wasm.wasmPaths = `${import.meta.env.BASE_URL}ort/`;
+      ort.env.wasm.wasmPaths = import.meta.env.BASE_URL + "ort/";
       ort.env.wasm.numThreads = 1;
       ort.env.wasm.proxy = false;
 
