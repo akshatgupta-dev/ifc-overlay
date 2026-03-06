@@ -903,6 +903,7 @@ function setGridVisible(g: any, vis: boolean) {
  wasm: { path: import.meta.env.BASE_URL + "wasm/", absolute: true },
   webIfc: {
     COORDINATE_TO_ORIGIN: true,
+    mt:false,
   },
 });
 
