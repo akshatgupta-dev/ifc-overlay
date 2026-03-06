@@ -3749,7 +3749,7 @@ async function autoAlignViaBackend() {
   formData.append("pdf", overlay.originalPdfFile);
 
   try {
-    const response = await fetch("http://localhost:8000/api/align", {
+    const response = await fetch("https://your-api-name.onrender.com/api/align", {
       method: "POST",
       body: formData,
     });
