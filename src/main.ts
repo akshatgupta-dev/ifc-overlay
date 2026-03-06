@@ -903,7 +903,6 @@ function setGridVisible(g: any, vis: boolean) {
  wasm: { path: import.meta.env.BASE_URL + "wasm/", absolute: true },
   webIfc: {
     COORDINATE_TO_ORIGIN: true,
-    mt:false,
   },
 });
 
@@ -2646,18 +2645,45 @@ function applyCalibrationToOverlay(overlay: PlanOverlay, sol: Similarity2D) {
       : auto.map((a) => a.storeyIdx);
   }
 
-  // 3) Load IFC into viewer
+  // // 3) Load IFC into viewer
   // currentModel = await ifcLoader.load(ifcBytes, false, ifcFile.name, {
   //   processData: {
   //     progressCallback: (p) => console.log("IFC conversion progress:", p),
   //   },
   // });
-    console.log("✅ IFC LOAD PROMISE RESOLVED!", currentModel);
-  pickableModelMeshes = collectPickableMeshes(currentModel.object);
+  //   console.log("✅ IFC LOAD PROMISE RESOLVED!", currentModel);
+  // pickableModelMeshes = collectPickableMeshes(currentModel.object);
+  // console.log("Pickable model meshes:", pickableModelMeshes.length);
+  // (raycaster as any).firstHitOnly = true;
+  // // Compute model bbox
+  // lastBBox = computeModelBBox(currentModel.object);
+  // const size = new THREE.Vector3();
+  // const center = new THREE.Vector3();
+  // lastBBox.getSize(size);
+  // lastBBox.getCenter(center);
+    // 1. Get a completely fresh copy of the file data so the parser doesn't get an empty buffer
+  const freshBuffer = await ifcFile.arrayBuffer();
+  const freshIfcBytes = new Uint8Array(freshBuffer);
+
+  // 2. Load the model (restoring your progress callback so it renders correctly)
+  currentModel = await ifcLoader.load(freshIfcBytes, false, ifcFile.name, {
+    processData: {
+      progressCallback: (p) => console.log("IFC conversion progress:", p),
+    },
+  });
+
+  console.log("✅ IFC LOAD PROMISE RESOLVED!", currentModel); 
+
+  // 3. CRITICAL: Remove `.object` from these two lines! 
+  // currentModel is already the geometry group, it doesn't have a .object property anymore.
+  pickableModelMeshes = collectPickableMeshes(currentModel);
   console.log("Pickable model meshes:", pickableModelMeshes.length);
+  
   (raycaster as any).firstHitOnly = true;
-  // Compute model bbox
-  lastBBox = computeModelBBox(currentModel.object);
+  
+  // CRITICAL: Remove `.object` here too!
+  lastBBox = computeModelBBox(currentModel);
+  
   const size = new THREE.Vector3();
   const center = new THREE.Vector3();
   lastBBox.getSize(size);
