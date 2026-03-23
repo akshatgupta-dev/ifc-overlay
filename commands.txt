@@ -1,0 +1,18 @@
+for the viewer
+
+cd :~/persistent/BIM/automation_pipeline/ifc-overlay$
+python3 -m pip install -r requirements.txt
+/home/user/.local/bin/nodeenv -p
+npm install
+/home/user/.local/bin/nodeenv node_venv
+source node_venv/bin/activate
+npm install -g cpy-cli
+npm install
+npm run dev
+
+
+
+for the alignment
+
+cd /home/user/persistent/BIM/automation_pipeline/bim2_api_rasterize
+python3 -m uvicorn main_api:app --reload

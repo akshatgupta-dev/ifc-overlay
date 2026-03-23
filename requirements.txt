@@ -1,4 +1,12 @@
 fastapi
 uvicorn
+<<<<<<< HEAD
+python-multipart
+numpy
+ifcopenshell
+PyMuPDF
+opencv-python-headless
+Pillow
+nodeenv
 numpy
 python-multipart

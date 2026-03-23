@@ -759,7 +759,8 @@ async function boot() {
   const floorSelect = document.getElementById("floorSelect") as HTMLSelectElement;
   const opacitySlider = document.getElementById("opacity") as HTMLInputElement;
   const focusPlanBtn = document.getElementById("focusPlan") as HTMLButtonElement;
-
+  const showcaseBtn = document.getElementById("showcaseBtn") as HTMLButtonElement;
+  console.log("showcaseBtn =", showcaseBtn);
   function setStatus(msg: string) {
     if (statusEl) statusEl.textContent = msg;
     console.log("[STATUS]", msg);
@@ -1007,7 +1008,24 @@ let currentIfcFile: File | null = null; // <--- ADDED
   let lastBBox: THREE.Box3 | null = null;
   let currentIfcName = "";
   let currentIfcHash = "";
+  
+  let showcaseRAF = 0;
+let showcaseRunning = false;
 
+function clamp01(x: number) {
+  return Math.max(0, Math.min(1, x));
+}
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+
+function easeInOutCubic(t: number) {
+  t = clamp01(t);
+  return t < 0.5
+    ? 4 * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
   // ------------------------
   // Tools / Filters state
   // ------------------------
@@ -1371,6 +1389,110 @@ function setHighlight(obj: THREE.Object3D) {
     if (c && "enabled" in c) c.enabled = v;
   }
 
+   function stopShowcaseAnimation() {
+  if (showcaseRAF) {
+    cancelAnimationFrame(showcaseRAF);
+    showcaseRAF = 0;
+  }
+
+  showcaseRunning = false;
+
+  // allow mouse/keyboard again
+  world.camera.setUserInput(true);
+
+  if (showcaseBtn) showcaseBtn.textContent = "Showcase";
+}
+function startShowcaseAnimation() {
+  console.log("start showcase", { currentModel, lastBBox });
+
+  if (!currentModel) {
+    setStatus("Load a model first.");
+    return;
+  }
+
+  world.camera.projection.set("Perspective");
+  world.camera.set("Orbit");
+  world.camera.setUserInput(false);
+
+  filter.isolateStorey = false;
+  applyStoreyClipping();
+
+  const obj = currentModel.object;
+  obj.updateWorldMatrix(true, true);
+
+  const bb = new THREE.Box3().setFromObject(obj);
+  const center = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  bb.getCenter(center);
+  bb.getSize(size);
+
+  const span = Math.max(size.x, size.y, size.z, 10);
+
+  // make the path VERY obvious
+  const radiusStart = span * 3.0;
+  const radiusEnd = span * 0.35;
+
+  const yStart = center.y + span * 1.2;
+  const yEnd = center.y + span * 0.18;
+
+  const lookYStart = center.y + size.y * 0.35;
+  const lookYEnd = center.y + size.y * 0.15;
+
+  const angleStart = -Math.PI * 0.25;
+  const angleEnd = angleStart + Math.PI * 2.5;
+
+  const oneWayMs = 12000;      // time to go start -> end
+const cycleMs = oneWayMs * 2; // full there-and-back cycle
+const startTime = performance.now();
+
+  const cam: any = world.camera.three;
+  cam.near = Math.max(0.01, span / 5000);
+  cam.far = span * 5000;
+  if (cam.isOrthographicCamera) cam.zoom = 1;
+  cam.updateProjectionMatrix?.();
+
+  showcaseRunning = true;
+  if (showcaseBtn) showcaseBtn.textContent = "Stop";
+
+  const step = (now: number) => {
+    if (!showcaseRunning) return;
+
+    const raw = ((now - startTime) % cycleMs) / cycleMs; // 0..1 across full cycle
+
+// ping-pong: 0->1->0
+const t = raw <= 0.5 ? raw * 2 : (1 - raw) * 2;
+
+const e = easeInOutCubic(t);
+
+    const angle = lerp(angleStart, angleEnd, e);
+    const radius = lerp(radiusStart, radiusEnd, e);
+    const camY = lerp(yStart, yEnd, e);
+    const lookY = lerp(lookYStart, lookYEnd, e);
+
+    const camX = center.x + Math.cos(angle) * radius;
+    const camZ = center.z + Math.sin(angle) * radius;
+
+    world.camera.controls.setLookAt(
+      camX,
+      camY,
+      camZ,
+      center.x,
+      lookY,
+      center.z,
+      false
+    );
+
+    // force control/camera update immediately
+    (world.camera.controls as any).update?.(0);
+
+    // keep fragments synced with the moving camera
+    fragments.core.update(true);
+showcaseRAF = requestAnimationFrame(step);
+  };
+
+  showcaseRAF = requestAnimationFrame(step);
+}
+
   // ------------------------
   // Click markers (for calibration feedback)
   // ------------------------
@@ -1552,6 +1674,7 @@ function setHighlight(obj: THREE.Object3D) {
   // Clear previous load
   // ------------------------
   function clearPrevious() {
+    stopShowcaseAnimation();
     clearHighlight();
     clearMarkers();
 
@@ -1837,7 +1960,6 @@ function loadOverlayTransform(idx: number): boolean {
     calibModelPts = [];
     calibPlanLocalPts = [];
     clearMarkers();
-    setControlsEnabled(false);
     floorSelect.disabled = true;
     fileInput.disabled = true;
 
@@ -3949,6 +4071,17 @@ autoAlignBtn.addEventListener("click", () => {
   autoAlignViaBackend();
 });
 
+  showcaseBtn?.addEventListener("click", () => {
+    console.log("showcase clicked");
+  if (showcaseRunning) {
+    stopShowcaseAnimation();
+    setStatus("Showcase stopped.");
+  } else {
+    startShowcaseAnimation();
+    setStatus("Showcase running...");
+  }
+});
+
   opacitySlider.addEventListener("input", () => {
     const value = parseFloat(opacitySlider.value);
     overlays.forEach((o) => (o.material.opacity = value));
@@ -3981,6 +4114,7 @@ const track = (m: any) => {
   calibrateBtn.addEventListener("click", () => beginCalibration());
 
   resetPlanBtn.addEventListener("click", () => {
+    stopShowcaseAnimation();
     if (calibStage !== "idle") {
       endCalibration(true);
       calibStage = "idle";
@@ -4001,6 +4135,12 @@ const track = (m: any) => {
 
   // ESC cancel
   window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && showcaseRunning) {
+  stopShowcaseAnimation();
+  setStatus("Showcase stopped.");
+  return;
+}
+    
     if (e.key === "Escape" && calibStage !== "idle") {
       endCalibration(true);
       calibStage = "idle";
