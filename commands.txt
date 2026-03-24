@@ -1,6 +1,6 @@
 for the viewer
 
-cd :~/persistent/BIM/automation_pipeline/ifc-overlay$
+cd /home/user/persistent/BIM/automation_pipeline/ifc-overlay
 python3 -m pip install -r requirements.txt
 /home/user/.local/bin/nodeenv -p
 npm install

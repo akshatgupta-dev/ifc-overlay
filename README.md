@@ -1,3 +1,6 @@
+## link to our viewer (align functionality not available right now)
+[viewer](https://akshatgupta-dev.github.io/ifc-overlay/)
+
 # IFC Overlay 
 
 A Building Information Modeling (BIM) automation pipeline tool designed to seamlessly align, calibrate, and overlay 2D floor plans (PDFs) onto 3D IFC models. This project utilizes in-browser Machine Learning (via ONNX Runtime) to handle automated element detection and mathematical alignment techniques to precisely position 2D overlays into 3D coordinate spaces.
